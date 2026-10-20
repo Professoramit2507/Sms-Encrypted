@@ -1,11 +1,10 @@
+import api, { ENDPOINTS } from './api.js';
 import { getReceiverUniqueKeySync } from './keyService.js';
 
 const delay = (ms = 100) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const CONV_STORAGE_KEY = 'mock_conversations_db';
 const MSG_STORAGE_KEY = 'mock_messages_db';
-
-// কমন কনভারসেশন আইডি যা সেন্ডার এবং রিসিভার শেয়ার করবে
 export const DEFAULT_CONV_ID = 'conv-sender-alice';
 
 const getCurrentUser = () => {
@@ -63,7 +62,6 @@ export const getStoredMessages = () => {
   }
 
   const defaultReceiverKey = getReceiverUniqueKeySync('c1');
-
   const defaultMsgs = {
     [DEFAULT_CONV_ID]: [
       {
@@ -84,21 +82,28 @@ export const getStoredMessages = () => {
   return defaultMsgs;
 };
 
-// ক্রস-ট্যাব এবং কম্পোনেন্ট সিঙ্কের জন্য ইভেন্ট নোটিফিকেশন
 export const notifySync = () => {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('secure-sms-sync'));
   }
 };
 
+// কনভারসেশন লিস্ট আনা (API + Fallback)
 export async function getConversations() {
+  try {
+    const { data } = await api.get(ENDPOINTS.messages.conversations);
+    if (Array.isArray(data) && data.length > 0) {
+      return data;
+    }
+  } catch {
+    // fallback to local mock
+  }
+
   await delay(80);
   const currentUser = getCurrentUser();
   const convs = getStoredConversations();
 
-  // ইউজারের দৃষ্টিকোণ অনুযায়ী পার্টিসিপ্যান্টের নাম ও তথ্য ডায়নামিক্যালি সেট করা
   return convs.map((c) => {
-    // যদি বর্তমান ইউজার Alice হয় ('c1'), তবে অপর প্রান্তের পার্টিসিপ্যান্ট Sender Demo
     if (currentUser.id === 'c1' || c.participantId === currentUser.id) {
       return {
         ...c,
@@ -110,7 +115,6 @@ export async function getConversations() {
         },
       };
     }
-    // অন্যথায় বর্তমান ইউজার Sender হলে পার্টিসিপ্যান্ট Alice (Receiver)
     return {
       ...c,
       participantId: c.participant?.id || 'c1',
@@ -123,7 +127,18 @@ export async function getConversations() {
   });
 }
 
+// কনভারসেশন তৈরি বা খোঁজা
 export async function createConversation(recipientId) {
+  try {
+    const { data } = await api.post(ENDPOINTS.messages.conversations, { recipientId });
+    if (data?.id) {
+      notifySync();
+      return data;
+    }
+  } catch {
+    // fallback
+  }
+
   await delay(100);
   const convs = getStoredConversations();
   const existing = convs.find(
@@ -154,28 +169,67 @@ export async function createConversation(recipientId) {
   return newConv;
 }
 
+// মেসেজ লোড করা
 export async function getMessages(conversationId) {
+  try {
+    const { data } = await api.get(ENDPOINTS.messages.messages(conversationId));
+    if (Array.isArray(data)) {
+      return data;
+    }
+  } catch {
+    // fallback
+  }
+
   await delay(80);
   const allMessages = getStoredMessages();
   return allMessages[conversationId] || allMessages[DEFAULT_CONV_ID] || [];
 }
 
+// মেসেজ পাঠানো (MongoDB-তে সেভ করা)
 export async function sendMessage(conversationId, payload) {
+  const textContent =
+    typeof payload === 'string'
+      ? payload
+      : payload.text || payload.content || 'Sample message';
+
+  const body = typeof payload === 'object'
+    ? {
+        content: payload.ciphertext || textContent,
+        ciphertext: payload.ciphertext || '',
+        iv: payload.iv || '',
+        wrappedKey: payload.wrappedKey || '',
+        payload: payload,
+        receiverId: payload.receiverId,
+        receiverKey: payload.receiverKey,
+        receiverFingerprint: payload.receiverFingerprint,
+        encrypted: payload.encrypted !== false,
+      }
+    : {
+        content: (typeof payload === 'object' && payload.ciphertext) ? payload.ciphertext : textContent,
+    ciphertext: (typeof payload === 'object' && payload.ciphertext) ? payload.ciphertext : '',
+    iv: (typeof payload === 'object' && payload.iv) ? payload.iv : '',
+    wrappedKey: (typeof payload === 'object' && payload.wrappedKey) ? payload.wrappedKey : '',
+    plaintext: '',
+      };
+
+  try {
+    const { data } = await api.post(ENDPOINTS.messages.send(conversationId), body);
+    if (data?.id) {
+      notifySync();
+      return data;
+    }
+  } catch {
+    // fallback
+  }
+
   await delay(100);
   const allMessages = getStoredMessages();
   const targetId = allMessages[conversationId] ? conversationId : DEFAULT_CONV_ID;
   const msgs = allMessages[targetId] || [];
 
   const currentUser = getCurrentUser();
-  const textContent =
-    typeof payload === 'string'
-      ? payload
-      : payload.text || payload.content || 'Sample message';
-
-  // প্রেরকের আইডি সঠিকভাবে নির্ধারণ
   const senderId = payload.senderId || currentUser.id || 'demo-user-1';
 
-  // প্রাপক (Receiver) কে নির্ধারণ
   const convs = getStoredConversations();
   const targetConv = convs.find((c) => c.id === targetId);
   let receiverId = 'c1';
@@ -185,7 +239,6 @@ export async function sendMessage(conversationId, payload) {
     receiverId = targetConv.participantId;
   }
 
-  // রিসিভারের জন্য ইউনিক কী নিশ্চিত ও যুক্ত করা
   const rcvKeyRecord = getReceiverUniqueKeySync(receiverId);
 
   const newMsg = {
@@ -194,8 +247,11 @@ export async function sendMessage(conversationId, payload) {
     receiverId,
     receiverKey: rcvKeyRecord.uniqueKey,
     receiverFingerprint: rcvKeyRecord.fingerprint,
-    content: textContent,
-    plaintext: textContent,
+    content: (typeof payload === 'object' && payload.ciphertext) ? payload.ciphertext : textContent,
+    ciphertext: (typeof payload === 'object' && payload.ciphertext) ? payload.ciphertext : '',
+    iv: (typeof payload === 'object' && payload.iv) ? payload.iv : '',
+    wrappedKey: (typeof payload === 'object' && payload.wrappedKey) ? payload.wrappedKey : '',
+    plaintext: '',
     payload: typeof payload === 'object' ? payload : { text: textContent },
     createdAt: new Date().toISOString(),
     status: 'delivered',
@@ -207,7 +263,6 @@ export async function sendMessage(conversationId, payload) {
   allMessages[targetId] = msgs;
   localStorage.setItem(MSG_STORAGE_KEY, JSON.stringify(allMessages));
 
-  // কনভারসেশনের শেষ মেসেজ আপডেট
   if (targetConv) {
     targetConv.lastMessage = { 
       content: textContent, 
@@ -224,15 +279,24 @@ export async function sendMessage(conversationId, payload) {
 }
 
 export async function markAsRead(messageId) {
+  try {
+    await api.patch(ENDPOINTS.messages.read(messageId));
+  } catch {
+    // fallback
+  }
   return { success: true, id: messageId };
 }
 
 export async function deleteConversation(conversationId) {
+  try {
+    await api.delete(ENDPOINTS.messages.delete(conversationId));
+  } catch {
+    // fallback
+  }
   await delay(80);
   const convs = getStoredConversations().filter((c) => c.id !== conversationId);
   localStorage.setItem(CONV_STORAGE_KEY, JSON.stringify(convs));
 
-  // সংশ্লিষ্ট মেসেজগুলো ডিলিট করা
   const allMessages = getStoredMessages();
   delete allMessages[conversationId];
   localStorage.setItem(MSG_STORAGE_KEY, JSON.stringify(allMessages));

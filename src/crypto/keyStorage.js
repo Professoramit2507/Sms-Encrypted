@@ -133,6 +133,16 @@ export async function loadPrivateKey() {
   return crypto.subtle.importKey('jwk', jwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['decrypt']);
 }
 
+
+export async function loadPrivateKeyJwk() {
+  const record = await loadKeyRecord();
+  if (!record?.wrappedPrivateKey) return null;
+  const wrappingKey = await getOrCreateWrappingKey();
+  const iv = base64ToBytes(record.wrapIv);
+  const wrapped = base64ToBytes(record.wrappedPrivateKey);
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, wrappingKey, wrapped);
+  return new TextDecoder().decode(decrypted);
+}
 export async function loadPublicKeySpki() {
   const record = await loadKeyRecord();
   return record?.publicKeySpki ?? null;

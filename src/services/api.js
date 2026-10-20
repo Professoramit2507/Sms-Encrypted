@@ -3,9 +3,6 @@ import axios from 'axios';
 /**
  * Central API client.
  *
- * Endpoint paths are placeholders until the real backend contract is confirmed.
- * Adjust ENDPOINTS in one place rather than hunting through components.
- *
  * Expected environment:
  *   VITE_API_BASE_URL=http://localhost:5000/api
  */
@@ -45,7 +42,6 @@ export const ENDPOINTS = {
 const TOKEN_KEY = 'secure-sms-token';
 
 export function getStoredToken() {
-  // Session storage only — avoid localStorage for bearer tokens.
   return sessionStorage.getItem(TOKEN_KEY);
 }
 
@@ -59,7 +55,7 @@ export function clearStoredToken() {
 }
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
@@ -91,6 +87,7 @@ api.interceptors.response.use(
     normalized.isNetwork = error.code === 'ERR_NETWORK' || !error.response;
 
     if (status === 401) {
+      clearStoredToken();
       normalized.code = 'unauthorized';
     }
 

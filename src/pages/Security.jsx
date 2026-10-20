@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Key } from 'lucide-react';
+import { Key, KeyRound, Sparkles } from 'lucide-react';
 import AppShell from '../components/common/AppShell.jsx';
 import KeyStatus from '../components/security/KeyStatus.jsx';
 import SecurityInfo from '../components/security/SecurityInfo.jsx';
+import ReceiverKeyModal from '../components/chat/ReceiverKeyModal.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { regenerateKeys } from '../crypto/encryptionManager.js';
 import { updatePublicKey, getStoredKeys } from '../services/keyService.js';
@@ -13,6 +14,7 @@ export default function Security() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
   const [receiverKeys, setReceiverKeys] = useState({});
 
   useEffect(() => {
@@ -31,6 +33,9 @@ export default function Security() {
       try {
         await updatePublicKey({
           publicKey: keys.publicKeySpki,
+          encryptedPrivateKey: keys.encryptedPrivateKey,
+          privateKeyIv: keys.privateKeyIv,
+          privateKeySalt: keys.privateKeySalt,
           algorithm: keys.algorithm,
           createdAt: keys.createdAt,
         });
@@ -50,7 +55,23 @@ export default function Security() {
   return (
     <AppShell>
       <div className="mx-auto max-w-4xl space-y-6">
-        <h1 className="text-2xl font-semibold">Security</h1>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">Security & Cryptography</h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Manage your end-to-end cryptographic keys and privacy settings.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setKeyModalOpen(true)}
+            className="btn-primary py-2 px-4 text-xs font-semibold shadow-glow flex items-center gap-1.5 self-start sm:self-auto"
+          >
+            <KeyRound className="h-4 w-4" />
+            <span>Generate & View Receiver Keys</span>
+          </button>
+        </div>
+
         <div className="grid gap-4 md:grid-cols-2">
           <KeyStatus
             status={status}
@@ -60,12 +81,12 @@ export default function Security() {
           <KeyStatus
             status={keyStatus?.hasPublicKey ? 'secure' : 'not_configured'}
             label="Public key"
-            detail="Registered locally. The raw private key is never shown."
+            detail="Registered in database as plaintext so senders can encrypt SMS."
           />
           <KeyStatus
             status={keyStatus?.hasPrivateKey ? 'secure' : 'unavailable'}
             label="Private key"
-            detail={keyStatus?.hasPrivateKey ? 'Present on this device (not displayed).' : 'Not available on this device.'}
+            detail={keyStatus?.hasPrivateKey ? 'Stored encrypted in database (AES-GCM). Only receiver can decrypt.' : 'Not available on this device.'}
           />
           <KeyStatus
             status={keyStatus?.createdAt ? 'secure' : 'warning'}
@@ -73,6 +94,32 @@ export default function Security() {
             detail={keyStatus?.createdAt ? new Date(keyStatus.createdAt).toLocaleString() : 'No generation date stored.'}
           />
         </div>
+
+        {/* কাস্টম কি-জেনারেশন কার্ড */}
+        <section className="card p-5 border-teal-500/20 bg-gradient-to-r from-teal-500/5 via-emerald-500/5 to-transparent">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+                <h2 className="font-bold text-sm text-slate-900 dark:text-white">
+                  Receiver Private Key Management
+                </h2>
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xl leading-relaxed">
+                রিসিভার হিসেবে আপনি নিজের প্রাইভেট কি তৈরি করতে পারেন। এই প্রাইভেট কি-টি ডেটাবেসে এনক্রিপ্ট অবস্থায় সংরক্ষিত থাকে এবং মেসেজ ডিক্রিপ্ট করার সময় আপনার এই কি-টি প্রয়োজন হবে।
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setKeyModalOpen(true)}
+              className="btn-primary py-2 px-4 text-xs font-semibold shrink-0 flex items-center gap-1.5"
+            >
+              <Key className="h-3.5 w-3.5" />
+              <span>Manage Keys / কি দেখুন</span>
+            </button>
+          </div>
+        </section>
+
         <section className="card">
           <h2 className="font-semibold">This device / session</h2>
           <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
@@ -90,7 +137,7 @@ export default function Security() {
             </div>
             <div>
               <dt className="text-slate-500">Private key storage</dt>
-              <dd>IndexedDB, wrapped with AES-GCM</dd>
+              <dd>Database (Encrypted AES-GCM) & IndexedDB local keystore</dd>
             </div>
           </dl>
         </section>
@@ -150,6 +197,7 @@ export default function Security() {
           </button>
         </section>
       </div>
+
       {confirmOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="regen-title">
           <button type="button" className="absolute inset-0 bg-slate-900/50" aria-label="Close dialog" onClick={() => setConfirmOpen(false)} />
@@ -171,6 +219,16 @@ export default function Security() {
           </div>
         </div>
       )}
+
+      {/* রিসিভার কি-ম্যানেজমেন্ট মোডাল */}
+      <ReceiverKeyModal
+        isOpen={keyModalOpen}
+        onClose={() => setKeyModalOpen(false)}
+        onKeyUpdated={() => {
+          refreshKeyStatus();
+          setReceiverKeys(getStoredKeys());
+        }}
+      />
     </AppShell>
   );
 }

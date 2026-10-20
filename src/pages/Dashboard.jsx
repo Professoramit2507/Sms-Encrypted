@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { MessageSquare, Shield, Users, UserCircle, Key, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
+import { MessageSquare, Shield, Users, UserCircle, Key, ArrowRight, ShieldCheck, Sparkles, Home } from 'lucide-react';
 import AppShell from '../components/common/AppShell.jsx';
 import KeyStatus from '../components/security/KeyStatus.jsx';
 import Loader from '../components/common/Loader.jsx';
@@ -35,9 +35,17 @@ export default function Dashboard() {
         <div className="relative overflow-hidden rounded-3xl border border-teal-500/20 bg-gradient-to-r from-teal-900/10 via-emerald-900/5 to-transparent p-6 sm:p-8 dark:border-white/10 dark:bg-obsidian-900/80 shadow-premium backdrop-blur-md">
           <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <div className="inline-flex items-center gap-1.5 rounded-full border border-teal-500/30 bg-teal-500/10 px-3 py-1 text-xs font-semibold text-teal-700 dark:text-teal-300 mb-3">
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>Protected by Client-Side RSA & AES-GCM</span>
+              <div className="inline-flex flex-wrap items-center gap-2 mb-3">
+                <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${user?.role === 'receiver'
+                    ? 'border border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300'
+                    : 'border border-teal-500/30 bg-teal-500/10 text-teal-700 dark:text-teal-300'
+                  }`}>
+                  {user?.role === 'receiver' ? '📥 Receiver (প্রাপক)' : '📤 Sender (প্রেরক)'}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-teal-500/30 bg-teal-500/10 px-3 py-1 text-xs font-semibold text-teal-700 dark:text-teal-300">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>DES + ElGamal Protected</span>
+                </span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
                 Welcome back, <span className="bg-gradient-to-r from-teal-600 to-emerald-600 bg-clip-text text-transparent dark:from-teal-400 dark:to-emerald-400">{name}</span>
@@ -47,13 +55,22 @@ export default function Dashboard() {
               </p>
             </div>
 
-            <Link
-              to="/chat"
-              className="btn-primary py-2.5 px-5 text-xs font-semibold shadow-glow self-start sm:self-auto shrink-0"
-            >
-              <MessageSquare className="h-4 w-4" />
-              <span>Launch Chat</span>
-            </Link>
+            <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto shrink-0">
+              <Link
+                to="/"
+                className="btn-secondary py-2.5 px-4 text-xs font-semibold"
+              >
+                <Home className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+                <span>Home Page</span>
+              </Link>
+              <Link
+                to="/chat"
+                className="btn-primary py-2.5 px-5 text-xs font-semibold shadow-glow"
+              >
+                <MessageSquare className="h-4 w-4" />
+                <span>Launch Chat</span>
+              </Link>
+            </div>
           </div>
         </div>
 
@@ -146,6 +163,10 @@ export default function Dashboard() {
             </div>
 
             <div className="grid gap-2">
+              <Link to="/" className="btn-secondary justify-start">
+                <Home className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+                <span>Home Page</span>
+              </Link>
               <Link to="/chat" className="btn-primary justify-start">
                 <MessageSquare className="h-4 w-4" />
                 <span>Open Messenger</span>

@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Lock, ArrowLeft, Key, Copy, Check, RefreshCw, ArrowLeftRight, ShieldCheck } from 'lucide-react';
+import { Lock, ArrowLeft, Key, Copy, Check, RefreshCw, ArrowLeftRight, ShieldCheck, KeyRound } from 'lucide-react';
 import MessageBubble from './MessageBubble.jsx';
 import MessageInput from './MessageInput.jsx';
+import DecryptModal from './DecryptModal.jsx';
+import ReceiverKeyModal from './ReceiverKeyModal.jsx';
 import Loader from '../common/Loader.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { useChat } from '../../context/ChatContext.jsx';
 import { getReceiverUniqueKey, regenerateReceiverUniqueKey } from '../../services/keyService.js';
 import { notifySync } from '../../services/messageService.js';
 
@@ -26,10 +29,18 @@ export default function ChatWindow({
   onBack,
 }) {
   const { user, updateUser } = useAuth();
+  const { markMessageDecrypted } = useChat();
   const bottomRef = useRef(null);
   const [receiverKey, setReceiverKey] = useState(null);
   const [copied, setCopied] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+
+  // ডিক্রিপ্ট পপআপ মোডাল স্টেট
+  const [activeDecryptMessage, setActiveDecryptMessage] = useState(null);
+  const [decryptModalOpen, setDecryptModalOpen] = useState(false);
+
+  // রিসিভার কি-ম্যানেজমেন্ট মোডাল স্টেট
+  const [keyModalOpen, setKeyModalOpen] = useState(false);
 
   // রিসিভারের আইডি বের করা
   const contactId = contact?.id || contact?.userId || (user?.id === 'c1' ? 'demo-user-1' : 'c1');
@@ -107,6 +118,17 @@ export default function ChatWindow({
     notifySync();
   };
 
+  // ডিক্রিপ্ট পপআপ ওপেন করার হ্যান্ডলার
+  const handleOpenDecryptModal = (msg) => {
+    setActiveDecryptMessage(msg);
+    setDecryptModalOpen(true);
+  };
+
+  // সফলভাবে মেসেজ ডিক্রিপ্ট হওয়ার পর চ্যাটে আপডেট করার হ্যান্ডলার
+  const handleDecryptedSuccess = (messageId, decryptedText) => {
+    markMessageDecrypted(messageId, decryptedText);
+  };
+
   if (!contact) {
     return (
       <div className="flex h-full flex-col items-center justify-center bg-[#f8fafc] p-6 text-center dark:bg-obsidian-950">
@@ -156,6 +178,17 @@ export default function ChatWindow({
 
         {/* ডান পাশের ইউনিক কী এবং রোল টগল */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* রিসিভারের নিজস্ব কি জেনারেট ও দেখার বাটন */}
+          <button
+            type="button"
+            onClick={() => setKeyModalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-teal-500/30 bg-teal-500/10 px-3 py-1 text-xs font-semibold text-teal-800 dark:text-teal-300 hover:bg-teal-500/20 transition-all shadow-2xs active:scale-95"
+            title="Generate & View Receiver Keys (Private Key is stored encrypted in DB)"
+          >
+            <KeyRound className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+            <span>Generate & View Keys</span>
+          </button>
+
           {/* রিসিভারের ইউনিক কী ব্যাজ */}
           <div
             className="flex items-center gap-1.5 rounded-full border border-teal-300/80 bg-gradient-to-r from-teal-50 to-emerald-50/80 px-3 py-1 text-xs font-mono font-medium text-teal-900 dark:border-teal-700/60 dark:from-teal-950/70 dark:to-emerald-950/70 dark:text-teal-300 shadow-2xs"
@@ -236,6 +269,7 @@ export default function ChatWindow({
               key={m.id}
               message={m}
               outgoing={outgoing}
+              onDecryptClick={handleOpenDecryptModal}
             />
           );
         })}
@@ -252,6 +286,24 @@ export default function ChatWindow({
       <div className="border-t border-slate-200/80 bg-white/90 p-2 backdrop-blur-md dark:border-white/10 dark:bg-obsidian-900/90 z-10">
         <MessageInput disabled={!contact} sending={sending} onSend={onSend} />
       </div>
+
+      {/* ডিক্রিপ্ট পপআপ মোডাল */}
+      <DecryptModal
+        isOpen={decryptModalOpen}
+        onClose={() => setDecryptModalOpen(false)}
+        message={activeDecryptMessage}
+        onDecrypted={handleDecryptedSuccess}
+      />
+
+      {/* রিসিভার কি-ম্যানেজমেন্ট ও জেনারেশন মোডাল */}
+      <ReceiverKeyModal
+        isOpen={keyModalOpen}
+        onClose={() => setKeyModalOpen(false)}
+        onKeyUpdated={(newKey) => {
+          setReceiverKey(newKey);
+          notifySync();
+        }}
+      />
     </div>
   );
 }

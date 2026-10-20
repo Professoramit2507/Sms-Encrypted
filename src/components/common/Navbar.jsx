@@ -89,7 +89,14 @@ export default function Navbar({ variant = 'marketing' }) {
               >
                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
                 <User className="h-3.5 w-3.5 text-slate-500" />
-                <span className="max-w-[120px] truncate">{user?.fullName || user?.username || 'Account'}</span>
+                <span className="max-w-[110px] truncate">{user?.fullName || user?.username || 'Account'}</span>
+                <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-md ${
+                  user?.role === 'receiver'
+                    ? 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
+                    : 'bg-teal-500/15 text-teal-700 dark:text-teal-300'
+                }`}>
+                  {user?.role === 'receiver' ? 'Receiver' : 'Sender'}
+                </span>
               </Link>
               <button
                 type="button"

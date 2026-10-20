@@ -43,24 +43,31 @@ export function AuthProvider({ children }) {
     return status;
   }, []);
 
-  const setupKeysIfNeeded = useCallback(async () => {
-    let status = await getEncryptionStatus();
-    if (!status.hasPrivateKey) {
-      const keys = await initializeUserKeys();
-      try {
-        await registerPublicKey({
-          publicKey: keys.publicKeySpki,
-          algorithm: keys.algorithm,
-          createdAt: keys.createdAt,
-        });
-      } catch {
-        // Backend may be offline; keys remain local so messaging can resume after API is available.
+  const setupKeysIfNeeded = useCallback(
+    async (userSecret) => {
+      let status = await getEncryptionStatus();
+      if (!status.hasPrivateKey) {
+        const secret = userSecret || user?.email || user?.username || 'secure-receiver-key-2026';
+        const keys = await initializeUserKeys(secret);
+        try {
+          await registerPublicKey({
+            publicKey: keys.publicKeySpki, // Public key stored normally in database
+            encryptedPrivateKey: keys.encryptedPrivateKey, // Private key stored encrypted only!
+            privateKeyIv: keys.privateKeyIv,
+            privateKeySalt: keys.privateKeySalt,
+            algorithm: keys.algorithm,
+            createdAt: keys.createdAt,
+          });
+        } catch {
+          // Backend may be offline; keys remain local so messaging can resume after API is available.
+        }
+        status = await getEncryptionStatus();
       }
-      status = await getEncryptionStatus();
-    }
-    setKeyStatus(status);
-    return status;
-  }, []);
+      setKeyStatus(status);
+      return status;
+    },
+    [user?.email, user?.username]
+  );
 
   const restoreSession = useCallback(async () => {
     if (!getStoredToken()) {
@@ -108,7 +115,7 @@ export function AuthProvider({ children }) {
       const result = await authService.login(credentials);
       writeUserSnapshot(result.user);
       setUser(result.user);
-      await setupKeysIfNeeded();
+      await setupKeysIfNeeded(credentials?.password);
       return result.user;
     },
     [setupKeysIfNeeded]
@@ -119,7 +126,7 @@ export function AuthProvider({ children }) {
       const result = await authService.register(payload);
       writeUserSnapshot(result.user);
       setUser(result.user);
-      await setupKeysIfNeeded();
+      await setupKeysIfNeeded(payload?.password);
       return result.user;
     },
     [setupKeysIfNeeded]

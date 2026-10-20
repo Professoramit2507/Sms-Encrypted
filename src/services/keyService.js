@@ -1,8 +1,9 @@
+import { generateReceiverKeySet } from '../crypto/encryptionManager.js';
 // src/services/keyService.js
+import api, { ENDPOINTS } from './api.js';
 import { generateReceiverKeyRecord, generateUniqueKeyId, generateKeyFingerprint } from '../crypto/keyGenerator.js';
 
-const delay = (ms = 150) => new Promise((resolve) => setTimeout(resolve, ms));
-
+const delay = (ms = 100) => new Promise((resolve) => setTimeout(resolve, ms));
 const KEYS_STORAGE_KEY = 'mock_user_keys_db';
 
 export const getStoredKeys = () => {
@@ -15,7 +16,6 @@ export const getStoredKeys = () => {
     }
   }
 
-  // Initial default keys with unique receiver key format
   const defaultKeys = {
     c1: {
       userId: 'c1',
@@ -25,28 +25,11 @@ export const getStoredKeys = () => {
       algorithm: 'RSA-OAEP-2048',
       createdAt: new Date().toISOString(),
     },
-    c2: {
-      userId: 'c2',
-      uniqueKey: 'RCV-KEY-C54D-9E11-2B88-12A7',
-      fingerprint: 'SHA256:3C:99:A1:88:DF:01:22:BE',
-      publicKey: 'spki-rsa2048-RCV-KEY-C54D-9E11',
-      algorithm: 'RSA-OAEP-2048',
-      createdAt: new Date().toISOString(),
-    },
-    'demo-user-1': {
-      userId: 'demo-user-1',
-      uniqueKey: 'SND-KEY-E810-77AC-391D-4560',
-      fingerprint: 'SHA256:5E:21:BC:90:3F:4D:11:09',
-      publicKey: 'spki-rsa2048-SND-KEY-E810-77AC',
-      algorithm: 'RSA-OAEP-2048',
-      createdAt: new Date().toISOString(),
-    },
   };
   localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(defaultKeys));
   return defaultKeys;
 };
 
-// বর্তমান ইউজারের আইডি খোঁজার হেল্পার
 const getCurrentUserId = () => {
   try {
     const raw = sessionStorage.getItem('secure-sms-user') || localStorage.getItem('mock_current_user');
@@ -60,56 +43,27 @@ const getCurrentUserId = () => {
   return 'demo-user-1';
 };
 
-// নির্দিষ্ট ইউজারের কী সেভ করার ফাংশন
-export const saveKeyForUser = (userId, keyData) => {
-  const keys = getStoredKeys();
-  const uid = userId || getCurrentUserId();
-  
-  let record;
-  if (typeof keyData === 'object' && keyData !== null) {
-    record = {
-      userId: uid,
-      uniqueKey: keyData.uniqueKey || generateUniqueKeyId(uid === 'demo-user-1' ? 'SND-KEY' : 'RCV-KEY'),
-      fingerprint: keyData.fingerprint || `SHA256:${generateKeyFingerprint()}`,
-      publicKey: keyData.publicKey || keyData.publicKeySpki || JSON.stringify(keyData),
-      algorithm: keyData.algorithm || 'RSA-OAEP-2048',
-      createdAt: keyData.createdAt || new Date().toISOString(),
-    };
-  } else {
-    record = {
-      userId: uid,
-      uniqueKey: generateUniqueKeyId('RCV-KEY'),
-      fingerprint: `SHA256:${generateKeyFingerprint()}`,
-      publicKey: String(keyData),
-      algorithm: 'RSA-OAEP-2048',
-      createdAt: new Date().toISOString(),
-    };
+// রিসিভারের জন্য ইউনিক কী পাওয়ার মেথড (API + Fallback)
+export async function getReceiverUniqueKey(receiverId) {
+  try {
+    const { data } = await api.get(ENDPOINTS.keys.byUser(receiverId));
+    if (data?.key) return data.key;
+  } catch {
+    // fallback to local storage
   }
 
-  keys[uid] = record;
-  localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
-  return { data: { success: true, ...record } };
-};
-
-// রিসিভারের জন্য ইউনিক কী পাওয়ার অথবা নতুন জেনারেট করার মেথড
-export async function getReceiverUniqueKey(receiverId) {
-  await delay(100);
   const keys = getStoredKeys();
   const existing = keys[receiverId];
-
-  // যদি অলরেডি ইউনিক কী থাকে এবং অবজেক্ট হয়
   if (existing && typeof existing === 'object' && existing.uniqueKey) {
     return existing;
   }
 
-  // যদি স্ট্রিং হিসেবে থাকে বা না থাকে, তবে নতুন ইউনিক কী জেনারেট হবে
   const newKeyRecord = await generateReceiverKeyRecord(receiverId);
   keys[receiverId] = newKeyRecord;
   localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
   return newKeyRecord;
 }
 
-// সিঙ্ক ভার্সন (কখনো সিঙ্ক ডাকার প্রয়োজন হলে)
 export function getReceiverUniqueKeySync(receiverId) {
   const keys = getStoredKeys();
   const existing = keys[receiverId];
@@ -129,35 +83,66 @@ export function getReceiverUniqueKeySync(receiverId) {
   return newKey;
 }
 
-// রিসিভারের ইউনিক কী রিজেনারেট করার মেথড
 export async function regenerateReceiverUniqueKey(receiverId) {
-  await delay(150);
   const keys = getStoredKeys();
   const newKeyRecord = await generateReceiverKeyRecord(receiverId);
   keys[receiverId] = newKeyRecord;
   localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
+
+  try {
+    await api.post(ENDPOINTS.keys.register, newKeyRecord);
+  } catch {
+    // local fallback
+  }
+
   return newKeyRecord;
 }
 
-// AuthContext এবং অন্যান্য জায়গায় ব্যবহৃত মেথড
-export async function registerPublicKey(publicKey) {
-  await delay(100);
-  return saveKeyForUser(getCurrentUserId(), publicKey);
+export async function registerPublicKey(keyData) {
+  const payload = typeof keyData === 'string'
+    ? {
+        uniqueKey: generateUniqueKeyId('RCV-KEY'),
+        fingerprint: `SHA256:${generateKeyFingerprint()}`,
+        publicKey: keyData,
+        algorithm: 'RSA-OAEP-2048',
+      }
+    : {
+        uniqueKey: keyData.uniqueKey || generateUniqueKeyId('RCV-KEY'),
+        fingerprint: keyData.fingerprint || `SHA256:${generateKeyFingerprint()}`,
+        publicKey: keyData.publicKey || keyData.publicKeySpki,
+        encryptedPrivateKey: keyData.encryptedPrivateKey || '',
+        privateKeyIv: keyData.privateKeyIv || '',
+        algorithm: keyData.algorithm || 'RSA-OAEP-2048',
+      };
+
+  try {
+    const { data } = await api.post(ENDPOINTS.keys.register, payload);
+    return data;
+  } catch {
+    // fallback
+    const keys = getStoredKeys();
+    keys[getCurrentUserId()] = payload;
+    localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
+    return { data: { success: true, ...payload } };
+  }
 }
 
-export async function uploadPublicKey(publicKey) {
-  await delay(100);
-  return saveKeyForUser(getCurrentUserId(), publicKey);
-}
+export const uploadPublicKey = registerPublicKey;
+export const updatePublicKey = registerPublicKey;
 
-export async function updatePublicKey(publicKey) {
-  await delay(100);
-  return saveKeyForUser(getCurrentUserId(), publicKey);
-}
-
-// ChatContext ও অন্যান্য কম্পোনেন্টে ব্যবহৃত মেথড
 export async function getPublicKey(userId) {
-  await delay(100);
+  try {
+    const { data } = await api.get(ENDPOINTS.keys.byUser(userId));
+    if (data?.key) {
+      return {
+        data: data.key,
+        ...data.key,
+      };
+    }
+  } catch {
+    // fallback
+  }
+
   const keyRecord = await getReceiverUniqueKey(userId);
   return {
     data: {
@@ -177,39 +162,65 @@ export async function getPublicKey(userId) {
 export const getUserPublicKey = getPublicKey;
 
 export async function getMyKeys() {
-  await delay(100);
-  const currentId = getCurrentUserId();
+  try {
+    const { data } = await api.get(ENDPOINTS.keys.me);
+    return data;
+  } catch {
+    return { key: getStoredKeys()[getCurrentUserId()] || null };
+  }
+}
+
+export async function getKeyStatus() {
+  try {
+    const { data } = await api.get(ENDPOINTS.keys.status);
+    return data;
+  } catch {
+    return { hasKey: false, key: null };
+  }
+}
+
+
+export async function generateAndPublishReceiverKeys(secret = 'secure-receiver-key-2026') {
+  const keySet = await generateReceiverKeySet(secret);
+  const uniqueKey = generateUniqueKeyId('RCV-KEY');
+  const fingerprint = 'SHA256:' + generateKeyFingerprint();
+  const payload = {
+    uniqueKey,
+    fingerprint,
+    publicKey: keySet.publicKeySpki,
+    encryptedPrivateKey: keySet.encryptedPrivateKey,
+    privateKeyIv: keySet.privateKeyIv,
+    privateKeySalt: keySet.privateKeySalt,
+    algorithm: keySet.algorithm,
+  };
+  try {
+    await registerPublicKey(payload);
+  } catch {}
   const keys = getStoredKeys();
-  const myKey = keys[currentId] || (await getReceiverUniqueKey(currentId));
+  const currentUserId = getCurrentUserId();
+  keys[currentUserId] = {
+    userId: currentUserId,
+    ...payload,
+    privateKeyJwk: keySet.privateKeyJwk,
+  };
+  localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
   return {
-    data: {
-      userId: currentId,
-      uniqueKey: myKey.uniqueKey,
-      publicKey: myKey.publicKey,
-      fingerprint: myKey.fingerprint,
-    },
+    ...payload,
+    publicKeySpki: keySet.publicKeySpki,
+    privateKeyJwk: keySet.privateKeyJwk,
   };
 }
 
-export async function deleteKeys() {
-  await delay(100);
-  const currentId = getCurrentUserId();
-  const keys = getStoredKeys();
-  delete keys[currentId];
-  localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
-  return { data: { success: true } };
-}
-
 export default {
+  getStoredKeys,
+  getReceiverUniqueKey,
+  getReceiverUniqueKeySync,
+  regenerateReceiverUniqueKey,
   registerPublicKey,
   uploadPublicKey,
   updatePublicKey,
   getPublicKey,
   getUserPublicKey,
   getMyKeys,
-  deleteKeys,
-  getReceiverUniqueKey,
-  getReceiverUniqueKeySync,
-  regenerateReceiverUniqueKey,
-  saveKeyForUser,
+  getKeyStatus,
 };
