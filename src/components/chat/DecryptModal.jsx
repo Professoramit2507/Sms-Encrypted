@@ -20,13 +20,18 @@ export default function DecryptModal({ isOpen, onClose, message, onDecrypted }) 
   const [decryptedText, setDecryptedText] = useState('');
   const [success, setSuccess] = useState(false);
 
+  const [activeReceiverKey, setActiveReceiverKey] = useState('');
+
   useEffect(() => {
     if (isOpen) {
       setError('');
       setDecryptedText('');
       setSuccess(false);
 
-      // Pre-fill public key if available from the message or receiver
+      keyService.getMyKeys().then((res) => {
+        if (res?.key?.uniqueKey) setActiveReceiverKey(res.key.uniqueKey);
+      });
+
       if (message?.receiverKey) {
         setPublicKey(message.receiverKey);
       } else {
@@ -42,18 +47,40 @@ export default function DecryptModal({ isOpen, onClose, message, onDecrypted }) 
   const handleAutoFillKeys = async () => {
     setError('');
     try {
-      const spki = await loadPublicKeySpki();
+      let spki = await loadPublicKeySpki();
+      let jwkStr = await loadPrivateKeyJwk();
+
+      // Check localStorage mock keys if indexedDB didn't have it
+      if (!jwkStr || !spki) {
+        const myKeys = await keyService.getMyKeys();
+        if (myKeys?.key?.privateKeyJwk) {
+          jwkStr = myKeys.key.privateKeyJwk;
+          if (myKeys.key.publicKey) spki = myKeys.key.publicKey;
+        }
+      }
+
+      // Check if message.receiverKey matches any stored key
+      if (!jwkStr && message?.receiverKey) {
+        const stored = keyService.getStoredKeys();
+        const found = Object.values(stored).find(
+          (k) => k?.uniqueKey === message.receiverKey || k?.publicKey === message.receiverKey
+        );
+        if (found?.privateKeyJwk) {
+          jwkStr = found.privateKeyJwk;
+          if (found.publicKey) spki = found.publicKey;
+        }
+      }
+
       if (spki) {
         setPublicKey(spki);
-      } else if (message.receiverKey) {
+      } else if (message?.receiverKey) {
         setPublicKey(message.receiverKey);
       }
 
-      const jwkStr = await loadPrivateKeyJwk();
       if (jwkStr) {
         setPrivateKey(jwkStr);
       } else {
-        setError('No private key found on this device keystore.');
+        setError('No private key found on this device keystore. Please open "Receiver Keys" and click "Generate Key" first.');
       }
     } catch {
       setError('Could not auto-load device keys.');
@@ -81,11 +108,37 @@ export default function DecryptModal({ isOpen, onClose, message, onDecrypted }) 
       return;
     }
 
+    let cleanKey = privateKey.trim();
+
+    // Check if user accidentally entered the Unique Key ID (RCV-KEY-...) or Public Key
+    if (cleanKey.startsWith('RCV-KEY') || cleanKey.startsWith('spki-')) {
+      const stored = keyService.getStoredKeys();
+      const match = Object.values(stored).find(
+        (k) => k?.uniqueKey === cleanKey || k?.publicKey === cleanKey || k?.userId === cleanKey
+      );
+      if (match?.privateKeyJwk) {
+        cleanKey = match.privateKeyJwk;
+        setPrivateKey(cleanKey);
+      } else {
+        setError(`⚠️ "${cleanKey}" is a Public Key / Unique Key ID, not a Private Key. The Private Key is the JSON string (JWK) from the "Receiver Keys" modal. Please paste the Private Key or click "Auto-fill My Keys".`);
+        setLoading(false);
+        return;
+      }
+    }
+
+    // Handle quoted strings
+    if ((cleanKey.startsWith('"') && cleanKey.endsWith('"')) || (cleanKey.startsWith("'") && cleanKey.endsWith("'"))) {
+      try {
+        cleanKey = JSON.parse(cleanKey);
+      } catch {
+        cleanKey = cleanKey.slice(1, -1);
+      }
+    }
+
     let result = null;
 
-    // 1. Try parsing privateKey as JWK JSON
+    // 1. Try parsing cleanKey as JWK JSON
     try {
-      const cleanKey = privateKey.trim();
       if (cleanKey.startsWith('{') && cleanKey.endsWith('}')) {
         const jwk = JSON.parse(cleanKey);
         const importedPrivKey = await crypto.subtle.importKey(
@@ -105,7 +158,7 @@ export default function DecryptModal({ isOpen, onClose, message, onDecrypted }) 
       // Continue to next method
     }
 
-    // 2. Try using the loaded device private key
+    // 2. Try using the loaded device private key from keystore
     if (!result) {
       try {
         const devPrivKey = await loadPrivateKey();
@@ -119,12 +172,39 @@ export default function DecryptModal({ isOpen, onClose, message, onDecrypted }) 
       }
     }
 
-    // 3. Try decrypting encrypted private key with privateKey as password/secret
+    // 3. Try stored key matching message.receiverKey
+    if (!result && message?.receiverKey) {
+      try {
+        const stored = keyService.getStoredKeys();
+        const match = Object.values(stored).find(
+          (k) => k?.uniqueKey === message.receiverKey || k?.publicKey === message.receiverKey
+        );
+        if (match?.privateKeyJwk) {
+          const jwk = JSON.parse(match.privateKeyJwk);
+          const importedPrivKey = await crypto.subtle.importKey(
+            'jwk',
+            jwk,
+            { name: 'RSA-OAEP', hash: 'SHA-256' },
+            false,
+            ['decrypt']
+          );
+          if (wrappedKey) {
+            const sessionRaw = await decryptAsymmetric(wrappedKey, importedPrivKey);
+            const sessionKey = await importSymmetricKey(sessionRaw);
+            result = await decryptSymmetric({ iv, ciphertext }, sessionKey);
+          }
+        }
+      } catch {
+        // Continue
+      }
+    }
+
+    // 4. Try decrypting encrypted private key with cleanKey as password/secret
     if (!result) {
       try {
         const myKeyRes = await keyService.getMyKeys();
         if (myKeyRes?.key?.encryptedPrivateKey) {
-          const decryptedPrivKey = await decryptPrivateKeyFromDatabase(myKeyRes.key, privateKey.trim());
+          const decryptedPrivKey = await decryptPrivateKeyFromDatabase(myKeyRes.key, cleanKey);
           if (wrappedKey) {
             const sessionRaw = await decryptAsymmetric(wrappedKey, decryptedPrivKey);
             const sessionKey = await importSymmetricKey(sessionRaw);
@@ -132,11 +212,11 @@ export default function DecryptModal({ isOpen, onClose, message, onDecrypted }) 
           }
         }
       } catch {
-        // Continue to next method
+        // Continue
       }
     }
 
-    // 4. Try symmetric fallback if wrappedKey was raw session key
+    // 5. Try symmetric fallback if wrappedKey was raw session key
     if (!result && wrappedKey) {
       try {
         const sessionKey = await importSymmetricKey(wrappedKey);
@@ -146,10 +226,10 @@ export default function DecryptModal({ isOpen, onClose, message, onDecrypted }) 
       }
     }
 
-    // 5. Try decrypting directly with privateKey as symmetric key
+    // 6. Try decrypting directly with cleanKey as symmetric key
     if (!result) {
       try {
-        const directKey = await importSymmetricKey(privateKey.trim());
+        const directKey = await importSymmetricKey(cleanKey);
         result = await decryptSymmetric({ iv, ciphertext }, directKey);
       } catch {
         // Failed
@@ -165,7 +245,15 @@ export default function DecryptModal({ isOpen, onClose, message, onDecrypted }) 
         onDecrypted(message.id, result);
       }
     } else {
-      setError('❌ Decryption failed! The provided Public Key or Private Key is incorrect or does not match this message.');
+      // Diagnostic error message to guide the user
+      const isLikelyCiphertext = cleanKey.length > 30 && !cleanKey.startsWith('{') && /^[A-Za-z0-9+/=:]+$/.test(cleanKey);
+      if (isLikelyCiphertext) {
+        setError('❌ You pasted the Database Encrypted Private Key (সাইফারটেক্সট) instead of the actual Private Key. Please copy the "Receiver Decryption Key" (JWK format) or click "Auto-fill My Keys".');
+      } else if (message?.receiverKey) {
+        setError(`❌ Decryption failed! Key mismatch: This message was encrypted for Receiver Key "${message.receiverKey}". If your keys were regenerated after this message was sent, the new private key cannot decrypt older messages. Please send a new message with the current keys.`);
+      } else {
+        setError('❌ Decryption failed! The provided Public Key or Private Key is incorrect or does not match this message.');
+      }
     }
   };
 
@@ -210,6 +298,19 @@ export default function DecryptModal({ isOpen, onClose, message, onDecrypted }) 
             {message.ciphertext || message.content || '🔒 Encrypted Payload'}
           </p>
         </div>
+
+        {/* Key Mismatch Warning Banner */}
+        {activeReceiverKey && message?.receiverKey && activeReceiverKey !== message.receiverKey && (
+          <div className="mb-4 rounded-2xl bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200 border border-amber-200 dark:border-amber-800">
+            <p className="font-semibold flex items-center gap-1.5 mb-1">
+              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+              <span>পূর্বের কি দিয়ে এনক্রিপ্ট করা মেসেজ (Older Key)</span>
+            </p>
+            <p className="text-[11px] leading-relaxed">
+              এই মেসেজটি <strong className="font-mono">{message.receiverKey}</strong> দিয়ে এনক্রিপ্ট করা হয়েছিল। আপনার বর্তমান অ্যাক্টিভ কি হলো <strong className="font-mono">{activeReceiverKey}</strong>। নতুন মেসেজের ডিক্রিপশন পরীক্ষা করতে সেন্ডার থেকে একটি নতুন মেসেজ পাঠান।
+            </p>
+          </div>
+        )}
 
         {/* Decryption Form */}
         <form onSubmit={handleDecrypt} className="space-y-4">

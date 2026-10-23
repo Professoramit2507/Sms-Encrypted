@@ -50,10 +50,13 @@ export async function generateReceiverKeyRecord(receiverId) {
   const uniqueKey = generateUniqueKeyId('RCV-KEY');
   const fingerprint = generateKeyFingerprint();
   let publicKeySpki = `spki-rsa2048-${uniqueKey}`;
+  let privateKeyJwk = '';
 
   try {
     const pair = await generateKeyPair();
     publicKeySpki = await exportPublicKey(pair.publicKey);
+    const jwk = await crypto.subtle.exportKey('jwk', pair.privateKey);
+    privateKeyJwk = JSON.stringify(jwk);
   } catch {
     // WebCrypto fallback for demo environments
   }
@@ -63,6 +66,7 @@ export async function generateReceiverKeyRecord(receiverId) {
     uniqueKey,
     fingerprint: `SHA256:${fingerprint}`,
     publicKey: publicKeySpki,
+    privateKeyJwk,
     algorithm: 'RSA-OAEP-2048',
     createdAt: new Date().toISOString(),
   };
