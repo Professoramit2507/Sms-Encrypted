@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Lock, ArrowLeft, Key, Copy, Check, RefreshCw, ArrowLeftRight, ShieldCheck, KeyRound } from 'lucide-react';
 import MessageBubble from './MessageBubble.jsx';
 import MessageInput from './MessageInput.jsx';
@@ -119,15 +119,18 @@ export default function ChatWindow({
   };
 
   // ডিক্রিপ্ট পপআপ ওপেন করার হ্যান্ডলার
-  const handleOpenDecryptModal = (msg) => {
+  const handleOpenDecryptModal = useCallback((msg) => {
     setActiveDecryptMessage(msg);
     setDecryptModalOpen(true);
-  };
+  }, []);
 
   // সফলভাবে মেসেজ ডিক্রিপ্ট হওয়ার পর চ্যাটে আপডেট করার হ্যান্ডলার
-  const handleDecryptedSuccess = (messageId, decryptedText) => {
-    markMessageDecrypted(messageId, decryptedText);
-  };
+  const handleDecryptedSuccess = useCallback(
+    (messageId, decryptedText) => {
+      markMessageDecrypted(messageId, decryptedText);
+    },
+    [markMessageDecrypted]
+  );
 
   if (!contact) {
     return (
@@ -146,27 +149,28 @@ export default function ChatWindow({
   }
 
   const name = contact.fullName || contact.username || 'Contact';
-  const isCurrentUserSender = user?.id !== 'c1';
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-slate-50 dark:bg-obsidian-950">
-      {/* গ্লাস হেডার */}
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-white/90 px-4 py-3 backdrop-blur-md dark:border-white/10 dark:bg-obsidian-900/90 shadow-2xs z-10">
+    <div className="flex h-full flex-col bg-[#efeae2]/30 dark:bg-obsidian-950/70">
+      {/* চ্যাট হেডার */}
+      <div className="flex items-center justify-between border-b border-slate-200/80 bg-white/90 px-4 py-2.5 backdrop-blur-md dark:border-white/10 dark:bg-obsidian-900/90 z-10">
         <div className="flex items-center gap-3 min-w-0">
-          {onBack && (
-            <button
-              type="button"
-              className="btn-ghost h-9 w-9 p-0 lg:hidden"
-              onClick={onBack}
-              aria-label="Back to conversations"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </button>
-          )}
-          <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-500/20 to-emerald-500/20 text-xs font-bold text-teal-800 dark:from-teal-400/25 dark:to-emerald-400/25 dark:text-teal-200 border border-teal-500/20">
-            {initials(name)}
-            <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-obsidian-900" />
-          </span>
+          <button
+            type="button"
+            onClick={onBack}
+            className="rounded-xl p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white lg:hidden"
+            aria-label="Back to contacts"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+
+          <div className="relative">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-emerald-600 text-sm font-bold text-white shadow-xs">
+              {initials(name)}
+            </div>
+            <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-obsidian-900" />
+          </div>
+
           <div className="min-w-0">
             <p className="truncate text-sm font-bold text-slate-900 dark:text-white leading-tight">{name}</p>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 font-medium">
@@ -222,51 +226,50 @@ export default function ChatWindow({
             </button>
           </div>
 
-          {/* রোল সুইচার */}
+          {/* রোল সুইচ বাটন (সেন্ডার <-> রিসিভার টেস্টিং) */}
           <button
             type="button"
             onClick={handleSwitchUserRole}
-            className="inline-flex items-center gap-1.5 rounded-full border border-slate-200/90 bg-white/90 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-all dark:border-white/10 dark:bg-obsidian-900 dark:text-slate-200 dark:hover:bg-obsidian-850 shadow-2xs active:scale-95"
-            title="Toggle between Sender and Receiver view to verify bubble positions"
+            className="inline-flex items-center gap-1 rounded-full border border-slate-300/80 bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 dark:hover:bg-white/10 transition-colors"
+            title="Switch User View (Sender / Receiver role testing)"
           >
-            <ArrowLeftRight className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
-            <span>
-              View as: <strong className="font-bold text-teal-700 dark:text-teal-300">{isCurrentUserSender ? 'Sender' : 'Receiver'}</strong>
+            <ArrowLeftRight className="h-3 w-3 text-teal-600 dark:text-teal-400" />
+            <span className="hidden md:inline font-mono text-[10px]">
+              {user?.id === 'c1' ? 'View: Alice (Receiver)' : 'View: Sender'}
             </span>
           </button>
         </div>
-      </header>
+      </div>
 
-      {/* চ্যাট স্ক্রিন (WhatsApp ওয়ালপেপার ব্যাকগ্রাউন্ড) */}
-      <div className="whatsapp-wallpaper chat-scroll flex-1 space-y-1.5 overflow-y-auto px-4 sm:px-6 py-4">
-        {/* এনক্রিপশন নোটিশ */}
-        <div className="my-2 flex justify-center">
-          <div className="flex items-center gap-2 rounded-2xl bg-amber-50/90 px-3.5 py-1.5 text-center text-xs text-amber-900 shadow-2xs dark:bg-amber-950/60 dark:text-amber-200 border border-amber-200/70 dark:border-amber-800/50 max-w-md backdrop-blur-xs">
-            <Lock className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span>
-              Messages are secured. Receiver holds unique key{' '}
-              <span className="font-mono font-bold text-amber-950 dark:text-amber-100">{receiverKey?.uniqueKey ? receiverKey.uniqueKey.slice(0, 16) + '…' : 'Generating...'}</span>
-            </span>
-          </div>
-        </div>
-
-        {loading && <Loader compact label="Loading messages" />}
-
-        {!loading && messages.length === 0 && (
-          <div className="py-16 text-center text-xs text-slate-500 space-y-2">
-            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-teal-100/50 dark:bg-white/5 text-teal-600">
-              <Lock className="h-5 w-5" />
-            </div>
-            <p>No messages yet. Send a message to start this encrypted conversation!</p>
+      {/* মেসেজ লিস্ট এরিয়া */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+        {loading && (
+          <div className="flex h-32 items-center justify-center">
+            <Loader size="md" />
           </div>
         )}
 
-        {/* মেসেজ বাবলস */}
+        {!loading && messages.length === 0 && (
+          <div className="flex h-48 flex-col items-center justify-center text-center">
+            <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-500/10 text-teal-600 dark:text-teal-400">
+              <Lock className="h-6 w-6" />
+            </div>
+            <p className="text-sm font-semibold text-slate-800 dark:text-white">Encrypted channel established</p>
+            <p className="mt-1 max-w-xs text-xs text-slate-500 dark:text-slate-400">
+              Messages are end-to-end encrypted with DES and ElGamal. Plaintext is decrypted only with Receiver Key.
+            </p>
+          </div>
+        )}
+
         {messages.map((m) => {
-          const outgoing = m.senderId === user?.id;
+          const senderId =
+            m.senderId ||
+            (typeof m.sender === 'object' ? m.sender?._id?.toString() : m.sender?.toString());
+          const outgoing = senderId === user?.id || (user?.id === 'demo-user-1' && !m.receiverKey);
+
           return (
             <MessageBubble
-              key={m.id}
+              key={m.id || m._id}
               message={m}
               outgoing={outgoing}
               onDecryptClick={handleOpenDecryptModal}
@@ -288,12 +291,17 @@ export default function ChatWindow({
       </div>
 
       {/* ডিক্রিপ্ট পপআপ মোডাল */}
-      <DecryptModal
-        isOpen={decryptModalOpen}
-        onClose={() => setDecryptModalOpen(false)}
-        message={activeDecryptMessage}
-        onDecrypted={handleDecryptedSuccess}
-      />
+      {decryptModalOpen && activeDecryptMessage && (
+        <DecryptModal
+          isOpen={decryptModalOpen}
+          onClose={() => {
+            setDecryptModalOpen(false);
+            setActiveDecryptMessage(null);
+          }}
+          message={activeDecryptMessage}
+          onDecrypted={handleDecryptedSuccess}
+        />
+      )}
 
       {/* রিসিভার কি-ম্যানেজমেন্ট ও জেনারেশন মোডাল */}
       <ReceiverKeyModal

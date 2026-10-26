@@ -14,19 +14,61 @@ export function useChat() {
   return ctx;
 }
 
-// In-memory cache for messages that have been decrypted on this client
+// Persistent cache helpers for messages that have been decrypted on this client device
+const DECRYPTED_CACHE_PREFIX = 'secure_sms_decrypted_cache';
+
+function getDecryptedStorageKey(userId) {
+  return `${DECRYPTED_CACHE_PREFIX}_${userId || 'default'}`;
+}
+
+function getStoredPlaintextCache(userId) {
+  try {
+    const raw = localStorage.getItem(getDecryptedStorageKey(userId));
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+function savePlaintextToPersistentCache(userId, msgId, plaintext) {
+  if (!msgId || !plaintext) return;
+  try {
+    const key = getDecryptedStorageKey(userId);
+    let cache = {};
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) cache = JSON.parse(raw);
+    } catch {}
+    cache[msgId] = plaintext;
+    localStorage.setItem(key, JSON.stringify(cache));
+  } catch {}
+}
+
+// In-memory cache synced with persistent storage
 const localPlaintextCache = new Map();
+
+function getCachedPlaintext(userId, msgId) {
+  if (!msgId) return null;
+  if (localPlaintextCache.has(msgId)) {
+    return localPlaintextCache.get(msgId);
+  }
+  const persistent = getStoredPlaintextCache(userId);
+  if (persistent && persistent[msgId]) {
+    localPlaintextCache.set(msgId, persistent[msgId]);
+    return persistent[msgId];
+  }
+  return null;
+}
 
 /**
  * Prepares messages for display:
  * - Outgoing messages (sent by current user) are already visible to the sender.
- * - Incoming messages arrive in strictly ENCRYPTED state for the receiver.
- * - The receiver must provide their Public Key and Private Key via the Decrypt Modal to reveal the original SMS!
+ * - Decrypted messages saved in local storage remain decrypted across browser reloads!
+ * - Incoming encrypted messages arrive in encrypted state until decrypted with receiver keys.
  */
 function prepareMessages(messages, currentUserId) {
   return messages.map((msg) => {
     const msgId = msg.id || msg._id;
-    const cached = localPlaintextCache.get(msgId);
+    const cached = getCachedPlaintext(currentUserId, msgId);
     if (cached) {
       return {
         ...msg,
@@ -45,6 +87,11 @@ function prepareMessages(messages, currentUserId) {
 
     if (isOutgoing) {
       const displayText = msg.plaintext || msg.content;
+      // Also save outgoing plaintext so reload retains it
+      if (displayText && displayText !== msg.ciphertext) {
+        savePlaintextToPersistentCache(currentUserId, msgId, displayText);
+        localPlaintextCache.set(msgId, displayText);
+      }
       return {
         ...msg,
         isDecrypted: true,
@@ -153,21 +200,27 @@ export function ChatProvider({ children }) {
     };
   }, [loadConversations, activeConversationId, refreshActiveMessages]);
 
-  const markMessageDecrypted = useCallback((messageId, decryptedText) => {
-    localPlaintextCache.set(messageId, decryptedText);
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === messageId || m._id === messageId
-          ? {
-              ...m,
-              isDecrypted: true,
-              plaintext: decryptedText,
-              content: decryptedText,
-            }
-          : m
-      )
-    );
-  }, []);
+  const markMessageDecrypted = useCallback(
+    (messageId, decryptedText) => {
+      const currentUserId = user?.id || 'demo-user-1';
+      localPlaintextCache.set(messageId, decryptedText);
+      savePlaintextToPersistentCache(currentUserId, messageId, decryptedText);
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId || m._id === messageId
+            ? {
+                ...m,
+                isDecrypted: true,
+                plaintext: decryptedText,
+                content: decryptedText,
+              }
+            : m
+        )
+      );
+    },
+    [user?.id]
+  );
 
   const sendEncryptedMessage = useCallback(
     async (text) => {
@@ -178,25 +231,19 @@ export function ChatProvider({ children }) {
 
       setSending(true);
       setError('');
-      try {
-        const currentUserId = user?.id || 'demo-user-1';
-        const cleanText = text.trim();
 
-        // 1. Determine recipient ID
-        const targetConv = conversations.find((c) => c.id === activeConversationId);
-        let recipientId =
+      try {
+        const cleanText = text.trim();
+        const currentUserId = user?.id || 'demo-user-1';
+
+        // 1. Recipient identification
+        const activeConv = conversations.find((c) => c.id === activeConversationId);
+        const recipientId =
           selectedContact?.id ||
           selectedContact?.userId ||
-          targetConv?.participantId ||
-          targetConv?.participant?.id;
-
-        if (!recipientId && targetConv?.participant?.username) {
-          recipientId = targetConv.participant.username;
-        }
-
-        if (!recipientId) {
-          recipientId = currentUserId === 'c1' ? 'demo-user-1' : 'c1';
-        }
+          activeConv?.participant?.id ||
+          activeConv?.participantId ||
+          'c1';
 
         // 2. Fetch recipient's PUBLIC KEY (stored normally in the database)
         let recipientKeyRecord = null;
@@ -258,6 +305,7 @@ export function ChatProvider({ children }) {
 
         const msgId = saved.id || `msg-${Date.now()}`;
         localPlaintextCache.set(msgId, cleanText);
+        savePlaintextToPersistentCache(currentUserId, msgId, cleanText);
 
         const localMsg = {
           id: msgId,

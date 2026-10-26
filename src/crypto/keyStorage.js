@@ -110,6 +110,29 @@ export async function storeKeyPair({ publicKeySpki, privateKey, algorithm, creat
   };
 
   await idbSet(RECORD_ID, record);
+
+  // Maintain key history in IndexedDB so older encrypted messages can always be decrypted
+  try {
+    const historyList = (await idbGet('key-history-records')) || [];
+    const exists = historyList.some((r) => r.publicKeySpki === publicKeySpki);
+    if (!exists) {
+      historyList.push(record);
+      await idbSet('key-history-records', historyList);
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  // Also preserve JWK in localStorage keystore_history for instantaneous fallback
+  try {
+    const rawHist = localStorage.getItem('keystore_history') || '{}';
+    const parsedHist = JSON.parse(rawHist);
+    parsedHist[publicKeySpki] = JSON.stringify(jwk);
+    localStorage.setItem('keystore_history', JSON.stringify(parsedHist));
+  } catch {
+    // Non-fatal
+  }
+
   return {
     publicKeySpki,
     algorithm: record.algorithm,
@@ -133,7 +156,6 @@ export async function loadPrivateKey() {
   return crypto.subtle.importKey('jwk', jwk, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['decrypt']);
 }
 
-
 export async function loadPrivateKeyJwk() {
   const record = await loadKeyRecord();
   if (!record?.wrappedPrivateKey) return null;
@@ -143,9 +165,67 @@ export async function loadPrivateKeyJwk() {
   const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, wrappingKey, wrapped);
   return new TextDecoder().decode(decrypted);
 }
+
 export async function loadPublicKeySpki() {
   const record = await loadKeyRecord();
   return record?.publicKeySpki ?? null;
+}
+
+/**
+ * Loads all private keys (current + historical) saved on this client device.
+ * Guarantees that older messages encrypted with previous keys can still be decrypted.
+ */
+export async function loadAllStoredPrivateKeyJwks() {
+  const jwks = new Set();
+
+  // 1. Current active key
+  try {
+    const activeJwk = await loadPrivateKeyJwk();
+    if (activeJwk) jwks.add(activeJwk);
+  } catch {}
+
+  // 2. IndexedDB history
+  try {
+    const historyList = (await idbGet('key-history-records')) || [];
+    const wrappingKey = await getOrCreateWrappingKey();
+    for (const record of historyList) {
+      try {
+        const iv = base64ToBytes(record.wrapIv);
+        const wrapped = base64ToBytes(record.wrappedPrivateKey);
+        const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, wrappingKey, wrapped);
+        const jwkStr = new TextDecoder().decode(decrypted);
+        if (jwkStr) jwks.add(jwkStr);
+      } catch {}
+    }
+  } catch {}
+
+  // 3. localStorage history
+  try {
+    const rawHist = localStorage.getItem('keystore_history');
+    if (rawHist) {
+      const parsed = JSON.parse(rawHist);
+      Object.values(parsed).forEach((val) => {
+        if (typeof val === 'string' && val.startsWith('{')) {
+          jwks.add(val);
+        }
+      });
+    }
+  } catch {}
+
+  // 4. localStorage mock_user_keys_db
+  try {
+    const rawMock = localStorage.getItem('mock_user_keys_db');
+    if (rawMock) {
+      const parsed = JSON.parse(rawMock);
+      Object.values(parsed).forEach((entry) => {
+        if (entry?.privateKeyJwk) {
+          jwks.add(entry.privateKeyJwk);
+        }
+      });
+    }
+  } catch {}
+
+  return Array.from(jwks);
 }
 
 export async function getKeyMetadata() {
@@ -174,5 +254,6 @@ export async function clearKeys() {
 
 export async function destroyKeystore() {
   await idbDelete(RECORD_ID);
+  await idbDelete('key-history-records');
   await idbDelete('wrapping-key');
 }

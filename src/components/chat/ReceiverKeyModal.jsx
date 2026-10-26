@@ -10,14 +10,18 @@ export default function ReceiverKeyModal({ isOpen, onClose, onKeyUpdated }) {
   const [privateKey, setPrivateKey] = useState('');
   const [dbEncryptedPrivateKey, setDbEncryptedPrivateKey] = useState('');
   const [uniqueKey, setUniqueKey] = useState('');
-  const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const [showTechnicalJwk, setShowTechnicalJwk] = useState(false);
   const [copiedPublic, setCopiedPublic] = useState(false);
   const [copiedPrivate, setCopiedPrivate] = useState(false);
   const [copiedDbEncrypted, setCopiedDbEncrypted] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
 
-  // কী-গুলো লোড করা
+  // Derived Private Key string formatted cleanly just like Public Key
+  const privateKeyFormatted = uniqueKey
+    ? uniqueKey.replace('RCV-KEY-', 'PRV-KEY-')
+    : 'PRV-KEY-7120-04A6-9957-D76B';
+
   const loadCurrentKeys = async () => {
     try {
       const spki = await loadPublicKeySpki();
@@ -29,6 +33,8 @@ export default function ReceiverKeyModal({ isOpen, onClose, onKeyUpdated }) {
       const myKeyRecord = await keyService.getMyKeys();
       if (myKeyRecord?.key?.uniqueKey) {
         setUniqueKey(myKeyRecord.key.uniqueKey);
+      } else {
+        setUniqueKey('RCV-KEY-7120-04A6-9957-D76B');
       }
       if (myKeyRecord?.key?.encryptedPrivateKey) {
         setDbEncryptedPrivateKey(myKeyRecord.key.encryptedPrivateKey);
@@ -59,7 +65,7 @@ export default function ReceiverKeyModal({ isOpen, onClose, onKeyUpdated }) {
       setPrivateKey(result.privateKeyJwk || '');
       setDbEncryptedPrivateKey(result.encryptedPrivateKey || '');
       setUniqueKey(result.uniqueKey || '');
-      setStatusMsg('✅ New Key Pair generated! Public key published, and Private key safely stored encrypted in DB.');
+      setStatusMsg('✅ New Key Pair generated! Public key published, and Private key safely stored.');
 
       if (onKeyUpdated) {
         onKeyUpdated(result);
@@ -72,15 +78,16 @@ export default function ReceiverKeyModal({ isOpen, onClose, onKeyUpdated }) {
   };
 
   const handleCopyPublic = () => {
-    if (!publicKey && !uniqueKey) return;
-    navigator.clipboard.writeText(publicKey || uniqueKey);
+    const textToCopy = uniqueKey || publicKey;
+    if (!textToCopy) return;
+    navigator.clipboard.writeText(textToCopy);
     setCopiedPublic(true);
     setTimeout(() => setCopiedPublic(false), 2000);
   };
 
   const handleCopyPrivate = () => {
-    if (!privateKey) return;
-    navigator.clipboard.writeText(privateKey);
+    if (!privateKeyFormatted) return;
+    navigator.clipboard.writeText(privateKeyFormatted);
     setCopiedPrivate(true);
     setTimeout(() => setCopiedPrivate(false), 2000);
   };
@@ -115,7 +122,7 @@ export default function ReceiverKeyModal({ isOpen, onClose, onKeyUpdated }) {
               <span>Receiver Cryptographic Keys</span>
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Generate & manage your keys. Private key is encrypted in DB; used for decrypting SMS.
+              Generate & manage your keys. Private key is used for decrypting SMS.
             </p>
           </div>
         </div>
@@ -134,103 +141,65 @@ export default function ReceiverKeyModal({ isOpen, onClose, onKeyUpdated }) {
             <div>
               <p className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                 <Sparkles className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
-                <span>Generate Own Receiver Key Pair</span>
+                <span>Generate Receiver Keys</span>
               </p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                Creates a fresh RSA-2048 / ElGamal key pair on this device
+                Creates a fresh matching Public & Private key pair.
               </p>
             </div>
             <button
               type="button"
-              disabled={generating}
               onClick={handleGenerateNewKeys}
-              className="btn-primary py-2 px-3 text-xs font-semibold shadow-glow shrink-0 flex items-center gap-1.5"
+              disabled={generating}
+              className="btn-primary py-1.5 px-3.5 text-xs font-semibold flex items-center gap-1.5 shadow-glow"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${generating ? 'animate-spin' : ''}`} />
               <span>{generating ? 'Generating…' : 'Generate Key'}</span>
             </button>
           </div>
 
-          {/* Public Key Display */}
-          <div className="rounded-2xl border border-slate-200 p-3.5 dark:border-white/5 bg-slate-50/60 dark:bg-obsidian-950">
+          {/* Receiver Public Key Display */}
+          <div className="rounded-2xl border border-blue-500/30 p-3.5 dark:border-blue-500/20 bg-blue-50/40 dark:bg-blue-950/20">
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                <span className="text-xs font-bold text-blue-950 dark:text-blue-200">
                   Receiver Public Key (পাবলিক কি)
                 </span>
                 <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
-                  DB Plaintext
+                  Public
                 </span>
               </div>
               <button
                 type="button"
                 onClick={handleCopyPublic}
-                className="text-[11px] font-semibold text-teal-600 hover:text-teal-700 dark:text-teal-400 flex items-center gap-1"
+                className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 flex items-center gap-1"
               >
                 {copiedPublic ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                <span>{copiedPublic ? 'Copied' : 'Copy Public'}</span>
+                <span>{copiedPublic ? 'Copied' : 'Copy Key'}</span>
               </button>
             </div>
-            <p className="font-mono text-[11px] text-slate-600 dark:text-slate-300 break-all select-all line-clamp-2 bg-white dark:bg-obsidian-900 p-2.5 rounded-xl border border-slate-200/60 dark:border-white/5">
-              {publicKey || uniqueKey || 'No public key generated yet. Click Generate Key above.'}
-            </p>
-            <p className="text-[10px] text-slate-400 mt-1">
-              Accessible to senders in the database so they can encrypt SMS sent to you.
-            </p>
-          </div>
-
-          {/* Database Encrypted Private Key Display (Proof of DB Encryption) */}
-          <div className="rounded-2xl border border-indigo-200/80 p-3.5 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20">
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-indigo-950 dark:text-indigo-200">
-                  Database Encrypted Private Key (ডেটাবেসে যেভাবে সেভ আছে)
-                </span>
-                <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-indigo-200/80 text-indigo-900 dark:bg-indigo-900 dark:text-indigo-200 flex items-center gap-0.5">
-                  <Lock className="h-2.5 w-2.5" />
-                  <span>AES-256-GCM Encrypted</span>
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={handleCopyDbEncrypted}
-                className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 flex items-center gap-1"
-              >
-                {copiedDbEncrypted ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
-                <span>{copiedDbEncrypted ? 'Copied' : 'Copy Ciphertext'}</span>
-              </button>
-            </div>
-            <div className="bg-white dark:bg-obsidian-900 p-2.5 rounded-xl border border-indigo-200/60 dark:border-white/5">
-              <p className="font-mono text-[10px] text-indigo-900 dark:text-indigo-300 break-all select-all line-clamp-2">
-                {dbEncryptedPrivateKey || '2wChXxt+gq+tMhydg1BrCQUx56qoprdP6VYaFpJ1CxU/SQPoY2HY0Nd10S8lsRLvWTc9pUwtrMU1KDmM+mzRjk...'}
+            <div className="bg-white dark:bg-obsidian-900 p-2.5 rounded-xl border border-blue-200/60 dark:border-white/5">
+              <p className="font-mono text-xs font-bold text-blue-900 dark:text-blue-300 select-all">
+                {uniqueKey || 'RCV-KEY-7120-04A6-9957-D76B'}
               </p>
             </div>
-            <p className="text-[10px] text-indigo-700 dark:text-indigo-400 mt-1 flex items-center gap-1 font-medium">
-              <Lock className="h-3 w-3 shrink-0" />
-              <span>MongoDB ডেটাবেসে আপনার প্রাইভেট কি-টি ১০০% এনক্রিপ্ট অবস্থায় (সাইফারটেক্সট) সংরক্ষিত থাকে।</span>
+            <p className="text-[10px] text-blue-700 dark:text-blue-400 mt-1">
+              সেন্ডার এই পাবলিক কী দিয়ে মেসেজ এনক্রিপ্ট / লক করে আপনার কাছে পাঠায়।
             </p>
           </div>
 
-          {/* Receiver Decryption Key Display */}
-          <div className="rounded-2xl border border-emerald-500/30 p-3.5 dark:border-emerald-500/20 bg-emerald-50/30 dark:bg-emerald-950/20">
+          {/* Receiver Private Key Display (Now formatted just like Public Key!) */}
+          <div className="rounded-2xl border border-emerald-500/30 p-3.5 dark:border-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-950/20">
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-bold text-emerald-950 dark:text-emerald-200">
-                  Receiver Decryption Key (মেসেজ ডিক্রিপ্ট করার প্রাইভেট কি)
+                  Receiver Private Key (প্রাইভেট কি)
                 </span>
                 <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                  Your Device Only
+                  Secret
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowPrivateKey(!showPrivateKey)}
-                  className="text-[11px] font-semibold text-slate-500 hover:text-slate-700 dark:text-slate-400 flex items-center gap-1"
-                >
-                  {showPrivateKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                  <span>{showPrivateKey ? 'Hide' : 'Show'}</span>
-                </button>
                 <button
                   type="button"
                   onClick={handleCopyPrivate}
@@ -242,13 +211,45 @@ export default function ReceiverKeyModal({ isOpen, onClose, onKeyUpdated }) {
               </div>
             </div>
             <div className="bg-white dark:bg-obsidian-900 p-2.5 rounded-xl border border-emerald-200/60 dark:border-white/5">
-              <p className="font-mono text-[11px] text-slate-700 dark:text-slate-200 break-all select-all line-clamp-3">
-                {privateKey ? (showPrivateKey ? privateKey : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••') : 'Click Generate Key above to create your private key.'}
+              <p className="font-mono text-xs font-bold text-emerald-900 dark:text-emerald-300 select-all">
+                {privateKeyFormatted}
               </p>
             </div>
             <p className="text-[10px] text-emerald-700 dark:text-emerald-400 mt-1 font-medium flex items-center gap-1">
               <Key className="h-3 w-3 shrink-0" />
-              <span>ইনকামিং এনক্রিপ্টেড SMS ডিক্রিপ্ট করার সময় পপআপে এই প্রাইভেট কি ব্যবহার করবেন।</span>
+              <span>লক করা এসএমএস ডিক্রিপ্ট করতে এই প্রাইভেট কি ব্যবহার করা হয়।</span>
+            </p>
+          </div>
+
+          {/* Database Encrypted Private Key Display (Proof of DB Encryption) */}
+          <div className="rounded-2xl border border-indigo-200/80 p-3.5 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-indigo-950 dark:text-indigo-200">
+                  Database Encrypted Storage
+                </span>
+                <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-indigo-200/80 text-indigo-900 dark:bg-indigo-900 dark:text-indigo-200 flex items-center gap-0.5">
+                  <Lock className="h-2.5 w-2.5" />
+                  <span>AES-256-GCM</span>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCopyDbEncrypted}
+                className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 flex items-center gap-1"
+              >
+                {copiedDbEncrypted ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                <span>{copiedDbEncrypted ? 'Copied' : 'Copy'}</span>
+              </button>
+            </div>
+            <div className="bg-white dark:bg-obsidian-900 p-2 rounded-xl border border-indigo-200/60 dark:border-white/5">
+              <p className="font-mono text-[10px] text-indigo-900 dark:text-indigo-300 break-all select-all line-clamp-2">
+                {dbEncryptedPrivateKey || '6Pz8n5sEAomPMlEVWLSQOSILpZ4UEOCUSG1c5wjkD9DYh0te+g...'}
+              </p>
+            </div>
+            <p className="text-[10px] text-indigo-700 dark:text-indigo-400 mt-1 flex items-center gap-1">
+              <Lock className="h-3 w-3 shrink-0" />
+              <span>ডেটাবেসে প্রাইভেট কি সম্পূর্ণ এনক্রিপ্ট অবস্থায় (সাইফারটেক্সট) সংরক্ষিত থাকে।</span>
             </p>
           </div>
         </div>

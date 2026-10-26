@@ -11,6 +11,7 @@ import {
   loadPrivateKey,
   loadPrivateKeyJwk,
   loadPublicKeySpki,
+  loadAllStoredPrivateKeyJwks,
   getKeyMetadata,
   clearKeys,
   destroyKeystore,
@@ -144,7 +145,6 @@ export async function initializeUserKeys(secret = 'secure-receiver-key-2026') {
   };
 }
 
-
 export async function generateReceiverKeySet(secret = 'secure-receiver-key-2026') {
   const generated = await generateUserKeyPair();
   const jwk = await crypto.subtle.exportKey('jwk', generated.privateKey);
@@ -163,6 +163,7 @@ export async function generateReceiverKeySet(secret = 'secure-receiver-key-2026'
     ...meta,
   };
 }
+
 export async function getEncryptionStatus() {
   return getKeyMetadata();
 }
@@ -241,4 +242,4 @@ export function isEncryptedEnvelope(value) {
   return Boolean(value && typeof value === 'object' && value.ciphertext && value.wrappedKey && value.algorithm);
 }
 
-export { loadPrivateKey, loadPublicKeySpki, loadPrivateKeyJwk } from './keyStorage.js';
+export { loadPrivateKey, loadPublicKeySpki, loadPrivateKeyJwk, loadAllStoredPrivateKeyJwks } from './keyStorage.js';
