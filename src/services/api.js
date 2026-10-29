@@ -19,6 +19,7 @@ export const ENDPOINTS = {
   },
   keys: {
     register: '/keys',
+    generate: '/keys/generate',
     me: '/keys/me',
     status: '/keys/status',
     byUser: (userId) => `/keys/${encodeURIComponent(userId)}`,
